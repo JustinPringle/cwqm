@@ -171,11 +171,11 @@ def create_sql_table_result(res_array,con,ini_file='model_ini.ini',db='WQ'):
     df[['beach','wq']] = df[['beach','wq']].values.astype(str)
     
     
-    con_db = con.connect()
+    # con_db = con.connect()
     
     df[['datetime','Year','Month','Day','Hour','wq','beach']].to_sql(name=db,con=con_db,if_exists='replace')
     
-    con_db.close()
+    # con_db.close()
     # return df
 
 
