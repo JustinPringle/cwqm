@@ -286,12 +286,12 @@ def formatUmgeni_dws(fileName):
     
     return df
                       
-
-fileName = '../test/forcing/weather.csv'
+if __name__=='__main__':
+    fileName = '../test/forcing/weather.csv'
 # udf = read_raw_umgeni(fileName)
 # df = formatUmgeni_dws('../test/forcing/umgeni_dws.csv')
-df = read_raw_weather('../test/forcing/weather.csv')
-df2 = formatDfWeather(df)
+    df = read_raw_weather('../test/forcing/weather.csv')
+    df2 = formatDfWeather(df)
 # print(os.getcwd())
 
 # df2.to_csv('../test/forcing/weatherForce.csv',index=False,float_format='%.3f')
