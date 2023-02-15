@@ -10,12 +10,12 @@ here I do some post work on my results
 import numpy as np
 import pandas as pd
 import configparser
-import utm
-import sqlite3
-from mysql.connector import connection
-import pymysql
+# import utm
+# import sqlite3
+# from mysql.connector import connection
+# import pymysql
 import sqlalchemy
-import sys
+# import sys
 # sys.path.append('../scripts')
 from pretreatment import read_weather
 from pretreatment import read_grid
