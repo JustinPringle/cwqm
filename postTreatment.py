@@ -173,7 +173,7 @@ def create_sql_table_result(res_array,con,ini_file='model_ini.ini',db='WQ'):
     
     # con_db = con.connect()
     
-    df[['datetime','Year','Month','Day','Hour','wq','beach']].to_sql(name=db,con=con_db,if_exists='replace')
+    df[['datetime','Year','Month','Day','Hour','wq','beach']].to_sql(name=db,con=con,if_exists='replace')
     
     # con_db.close()
     # return df
