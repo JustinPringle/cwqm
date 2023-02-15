@@ -15,6 +15,7 @@ import numpy as np
 import sys
 from forcingSort import get_gfs
 import obscape
+from urllib.request import urlopen
 import subprocess
 import pandas as pd
 import processObs
@@ -22,18 +23,24 @@ import utils
 import datetime as dt
 import postTreatment
 import res_plot
+from pretreatment import read_obs_params
+import configparser
+config = configparser.ConfigParser()
+config.read('model_ini.ini')
+file_obs_locs = config.get('input files','fileObsLocs')
 # import model
 
 #get gfs and obscape
 gfsDf = get_gfs()
 now = dt.datetime.now()
-_from = now-dt.timedelta(days=30)
+_from = now-dt.timedelta(days=20)
 obsDf = obscape.getData(now,_from)
 
 #now merge the observed with forecast data
 
 #note the times here are in UTC so I must change them to Africa/Johannesburg 
 # before the model is run
+#%%
 weatherMerged = obsDf.merge(gfsDf,
                             on=['datetime','wind_speed','rain','direction'],
                             how='outer')
@@ -59,8 +66,11 @@ umgeniDf['hour'] = umgeniDf['datetime'].dt.hour
 #save as csv
 umgeniDf[['year','month','day','hour','flow']].to_csv('forcing/umgeni_flow.csv')
 
+#%%
 #process the observations
+# ar_obs_names, ar_obs_coorx, ar_obs_coory = read_obs_params(file_obs_locs)
 ecoliPadded = processObs.createTable2(weatherMerged['datetime']).set_index('datetime')
+obsNames = list(ecoliPadded.columns)
 try:
     ecoliDf = processObs.queryDB(_from)
     ecoliDf['datetime']=ecoliDf['datetime'].map(lambda x: x.tz_localize('Africa/Johannesburg'))
@@ -81,7 +91,7 @@ mergedEcoli['hour'] = mergedEcoli.index.hour
 #save to csv
 ##reanrange columns
 cols = list(mergedEcoli.columns.values)
-cols = cols[-4::]+cols[0:-4]
+cols = cols[-4::]+obsNames
 mergedEcoli[cols].to_csv('observations/observations.csv',index=False)
 
 #%%
@@ -120,7 +130,10 @@ cDfNewMelt.to_csv('start_files/C.csv',float_format='%.3f')
 ### POST to SQL
 
 con = postTreatment.create_con()
-# postTreatment.create_sql_table_result(C, con,db='WQ2')
+postTreatment.create_sql_table_result(C, con,db='WQ2')
+
+url = 'https://justinpringle.com/woza_ewandle/createJSON/wqJSON_generator.php'
+response = urlopen(url)
 # con.close()
 
 
