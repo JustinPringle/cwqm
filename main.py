@@ -11,6 +11,7 @@ This is the main code
 3. generate weather input
 4. generate umgeni flows
 """
+import os
 import numpy as np
 import sys
 from forcingSort import get_gfs
@@ -131,7 +132,7 @@ cDfNewMelt.to_csv('start_files/C.csv',float_format='%.3f')
 
 con = postTreatment.create_con()
 postTreatment.create_sql_table_result(C, con,db='WQ2')
-
+os.system('cd /var/www/html/php/ && php wqJSON_generator.php')
 url = 'https://justinpringle.com/woza_ewandle/createJSON/wqJSON_generator.php'
 response = urlopen(url)
 # con.close()
