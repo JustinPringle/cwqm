@@ -125,10 +125,19 @@ def format1HR(df):
     df = df.set_index('datetime')
     #fill 5 min data
     df = df.asfreq(freq='300S')
-    #only fill wind
+    #only fill wind first inbetweens then forwards (i.e. end of df) and backwards (ie nans at beginning of df)
     df['wind_speed'] = (df['wind_speed'].ffill()+df['wind_speed'].bfill())/2
+    df['wind_speed'] = (df['wind_speed'].ffill())
+    df['wind_speed'] =df['wind_speed'].bfill()
+    
     df['east_wind'] = (df['east_wind'].ffill()+df['east_wind'].bfill())/2
+    df['east_wind'] = df['east_wind'].ffill()
+    df['east_wind'] = df['east_wind'].bfill()
+    
     df['north_wind'] = (df['north_wind'].ffill()+df['north_wind'].bfill())/2
+    df['north_wind'] = df['north_wind'].ffill()
+    df['north_wind'] = df['north_wind'].bfill()
+    
     df['rain'] = df['rain'].fillna(0)
     df = df.reset_index()
     
