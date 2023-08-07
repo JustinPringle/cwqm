@@ -34,7 +34,7 @@ file_obs_locs = config.get('input files','fileObsLocs')
 #get gfs and obscape
 gfsDf = get_gfs()
 now = dt.datetime.now()
-_from = now-dt.timedelta(days=20)
+_from = now-dt.timedelta(days=60)
 obsDf = obscape.getData(now,_from)
 
 #now merge the observed with forecast data

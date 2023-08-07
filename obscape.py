@@ -50,7 +50,7 @@ def getData(nowDate,fromDate,stationID=457,hours=168):
     nowDateStr = nowDate.strftime('%Y-%m-%dT%H:%M:%S')
     fromDateStr = fromDate.strftime('%Y-%m-%dT%H:%M:%S')
     
-    url = 'https://obscape.com/portal/api/v3/api?username={name}&key={key}&station={station}&from={_from}&to={_to}'.format(
+    url = 'https://obscape.com/portal/api/v3/api?username={name}&project=ethek&key={key}&station={station}&from={_from}&to={_to}'.format(
         name=userDict['name'],key=userDict['api'],station=stationID,_from=fromDateStr,
         _to=nowDateStr)
     
