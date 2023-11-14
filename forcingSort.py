@@ -60,7 +60,7 @@ def get_gfs(var_list = ['ugrd10m','vgrd10m','apcpsfc'],lat=-29.75,lon = 31,
         p = res.variables["apcpsfc"].data.flatten()[0].round(3)
         if p>1000:
             p=0
-        
+        print(p)
         spd = np.sqrt(u**2+v**2).round(3)
         #this is wind going to... I must convert to coming from to sync with my model treatment 
         direction = ((270-np.degrees(np.arctan2(v,u)))%360).round(3)
