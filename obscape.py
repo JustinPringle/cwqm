@@ -54,30 +54,39 @@ def getData(nowDate,fromDate,stationID=457,hours=168):
         name=userDict['name'],key=userDict['api'],station=stationID,_from=fromDateStr,
         _to=nowDateStr)
     
+    #rain from durban point Durban_Point
+    urlRain = 'https://obscape.com/portal/api/v3/api?username={name}&project=ethek&key={key}&ref={ref}&device={device}&from={_from}&to={_to}'.format(
+        name=userDict['name'],key=userDict['api'],ref='Durban_Point',device='rain',_from=fromDateStr,
+        _to=nowDateStr)
+    
     print(url)
     
     response = urlopen(url)
+    responseR = urlopen(urlRain)
     
     dataJSON = js.load(response)
+    dataJSONRain = js.load(responseR)
     
     data = dataJSON['data']
+    dataR = dataJSONRain['data']
     
     num_items = len(data)
+    num_items_rain = len(dataR)
     
     dfDict ={
         'datetime':[],
         'wind_speed':[],
         'east_wind':[],
         'north_wind':[],
-        'wind_direction':[],
-        'rain':[]
+        'wind_direction':[]
+        # 'rain':[]
         }
     
     for i in range(num_items):
         datUTC = data[i]['time']
         wspd = data[i]['windSpeed']
         wdir = data[i]['windDirection']
-        rain = data[i]['precipitation']
+        # rain = data[i]['precipitation']
         ew = data[i]['EastWindSpeed']
         nw = data[i]['NorthWindSpeed']
         
@@ -90,8 +99,8 @@ def getData(nowDate,fromDate,stationID=457,hours=168):
             nw=np.nan
         if wdir<-100:
             wdir=np.nan
-        if rain <-100:
-            rain=np.nan
+        # if rain <-100:
+        #     rain=np.nan
         
         #correct times
         datFrom = dt.datetime.utcfromtimestamp(int(datUTC)).replace(tzinfo=from_zone)
@@ -102,12 +111,38 @@ def getData(nowDate,fromDate,stationID=457,hours=168):
         dfDict['wind_direction'].append(wdir)
         dfDict['east_wind'].append(ew)
         dfDict['north_wind'].append(nw)
-        dfDict['rain'].append(rain)
+        # dfDict['rain'].append(rain)
+    
+    dataWeather = format1HRW(pd.DataFrame(data=dfDict))
+    
+    #get rain
+    dfDictR = {
+        'datetime':[],
+        'rain':[]
+        }
+    
+    for i in range(num_items_rain):
+        rain = dataR[i]['precipitation']
+        datUTC = dataR[i]['time']
         
-    return format1HR(pd.DataFrame(data=dfDict))
+        if rain <-100:
+            rain=np.nan
+        
+        datFrom = dt.datetime.utcfromtimestamp(int(datUTC)).replace(tzinfo=from_zone)
+        datLocal = datFrom.astimezone(to_zone)
+        
+        dfDictR['datetime'].append(datFrom)
+        dfDictR['rain'].append(rain)
+        
+    dataRain = format1HRR(pd.DataFrame(data=dfDictR))
+    
+    dfAll = dataWeather.merge(dataRain,on='datetime')
+    
+        
+    return dfAll
 
 
-def format1HR(df):
+def format1HRW(df):
     '''
     
 
@@ -139,7 +174,7 @@ def format1HR(df):
     df['north_wind'] = df['north_wind'].ffill()
     df['north_wind'] = df['north_wind'].bfill()
     
-    df['rain'] = df['rain'].fillna(0)
+    # df['rain'] = df['rain'].fillna(0)
     df = df.reset_index()
     
     #add hour
@@ -151,8 +186,8 @@ def format1HR(df):
     #avg for hour
     df=df.groupby(['year','month','day','hour'],as_index=False).agg(
         east_wind = pd.NamedAgg(column='east_wind', aggfunc='mean'),
-        north_wind = pd.NamedAgg(column='north_wind', aggfunc='mean'),
-        rain = pd.NamedAgg(column = 'rain',aggfunc='sum'))
+        north_wind = pd.NamedAgg(column='north_wind', aggfunc='mean'))#,
+        #rain = pd.NamedAgg(column = 'rain',aggfunc='sum'))
     
     spd=[]
     dirs=[]
@@ -185,7 +220,51 @@ def format1HR(df):
            
     # pd.date_range(start=df.index[0], end=3, freq="H")
     
-    return df[['datetime','wind_speed','direction','rain']]
+    return df[['datetime','wind_speed','direction']]
+
+def format1HRR(df):
+    '''
+    
+
+    Parameters
+    ----------
+    df : Dataframe
+        dataframe containing weather data.
+
+    Returns
+    -------
+    formatted df.
+
+    '''
+    #fill missing dates
+    df = df.set_index('datetime')
+    #fill 5 min data
+    df.resample('300S')
+    
+    
+    
+    df['rain'] = df['rain'].fillna(0)
+    df = df.reset_index()
+    
+    #add hour
+    df['hour']=df['datetime'].dt.hour
+    df['day'] = df['datetime'].dt.day
+    df['month'] = df['datetime'].dt.month
+    df['year'] = df['datetime'].dt.year
+    
+    #avg for hour
+    df=df.groupby(['year','month','day','hour'],as_index=False).agg(
+        rain = pd.NamedAgg(column = 'rain',aggfunc='sum'))
+    
+    
+    
+    df['datetime'] = pd.to_datetime(df[['year','month','day','hour']],utc=True)#.map(
+        # lambda x: x.tz_convert('Africa/Johannesburg')
+        # )
+           
+    # pd.date_range(start=df.index[0], end=3, freq="H")
+    
+    return df[['datetime','rain']]
 
 if __name__=='__main__':
     df = getData()
