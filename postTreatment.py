@@ -83,13 +83,18 @@ def createSQL_db(obsDF,con):
     # c.execute('CREATE TABLE IF NOT EXISTS beachLocs \
     #           (id , price number)')
 
+# E. coli thresholds (CFU/100 mL) for beach water quality classification.
+_WQ_GOOD_THRESHOLD = 250
+_WQ_ACCEPT_THRESHOLD = 500
+
+
 def _replaceitem(x):
-   if x <250:
-       return 'Good'
-   elif x >=250 and x<500:
-      return 'Accept'
-   else:
-       return 'Bad'     
+    if x < _WQ_GOOD_THRESHOLD:
+        return 'Good'
+    elif x < _WQ_ACCEPT_THRESHOLD:
+        return 'Accept'
+    else:
+        return 'Bad'
 
 def create_sql_table_result(res_array,con,ini_file='model_ini.ini',db='WQ'):
     '''

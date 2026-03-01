@@ -11,6 +11,22 @@ import configparser
 import json
 import sys
 sys.path.append('../scripts')
+
+# ---------------------------------------------------------------------------
+# Model constants
+# ---------------------------------------------------------------------------
+# Cross-sectional area of each coastal cell (m²). Used in residence-time calc.
+CELL_XSECT = 200
+
+# Process noise scaling factor: Q = I * e_load * Q_FAC
+Q_FAC = 0.8
+
+# Observation noise scaling factor: R = I * obs * R_FAC
+R_FAC = 5000
+
+# E. coli dilution factor applied to river mean loads read from config.
+# Divides the raw ecoli_mean values (CFU/100mL) by this factor.
+ECOLI_RIVER_SCALE = 250
 from pretreatment import read_global_params
 from pretreatment import read_grid
 from pretreatment import read_input
@@ -68,7 +84,7 @@ def createA(cell_lengths,w_flag,wind,Cac,Td):
                 
     return A
 
-def createB(Q,cell_lengths,xsect=200):
+def createB(Q,cell_lengths,xsect=CELL_XSECT):
     '''
     
 
@@ -281,7 +297,7 @@ def run(ini_file='model_ini.ini'):
     x_river = np.asarray(json.loads(config.get('river locs','X')))
     y_river = np.asarray(json.loads(config.get('river locs','Y')))
     
-    e_riv_mean = np.asarray(json.loads(config.get('river e load','ecoli_mean')))/250
+    e_riv_mean = np.asarray(json.loads(config.get('river e load','ecoli_mean')))/ECOLI_RIVER_SCALE
     e_riv_std = np.asarray(json.loads(config.get('river e load','ecoli_std')))
     
     #use the first list to create a river array
@@ -421,11 +437,10 @@ def _exec(params):
     x_k_no_update[0,:]=C0
     
     # P,Q and R init matrices
-    P = params['P']#np.eye(nb_cells)*10000
+    P = params['P']
     P_new = copy.deepcopy(P)
-    # Q = np.eye(nb_cells)*500
-    Q_fac = 0.8
-    R_fac = 5000# = np.eye(D.shape[0])*100000
+    Q_fac = Q_FAC
+    R_fac = R_FAC
     alpha=1
     alpha2=1
     for t in tqdm(range(nb_time_steps),

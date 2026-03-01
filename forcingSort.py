@@ -8,86 +8,100 @@ sort the format of the weather forcing
 out:
     year month day hour rain wind direction
 """
+import logging
+import json as js
 import pandas as pd
 import numpy as np
 import os
-import getgfs
 import datetime as dt
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 from dateutil import tz
+
+logger = logging.getLogger(__name__)
 
 from_zone = tz.gettz('UTC')
 to_zone = tz.gettz('Africa/Johannesburg')
 
-def get_gfs(var_list = ['ugrd10m','vgrd10m','apcpsfc'],lat=-29.75,lon = 31,
-             forecast_length=48):
+# NOMADS OpenDAP service was shut down on 24 Feb 2026 (SCN25-81).
+# GFS forecast data is now fetched from the Open-Meteo API, which provides
+# the same GFS-seamless model output for a single lat/lon point as JSON.
+_OPENMETEO_URL = (
+    'https://api.open-meteo.com/v1/forecast'
+    '?latitude={lat}&longitude={lon}'
+    '&hourly=wind_speed_10m,wind_direction_10m,precipitation'
+    '&wind_speed_unit=ms'
+    '&timezone=UTC'
+    '&forecast_days={days}'
+)
+_REQUEST_TIMEOUT = 30
+
+def get_gfs(var_list=None, lat=-29.75, lon=31, forecast_length=48):
     '''
-    
-    queries the NCEP OPENDap site
-    get current to 24hrs forecast gfs wind and rain 
+    Fetch GFS forecast wind and rain from the Open-Meteo API.
+
+    The original implementation queried the NCEP NOMADS OpenDAP service,
+    which was permanently shut down on 24 Feb 2026. Open-Meteo provides
+    the same GFS-seamless data as hourly JSON for a single lat/lon point
+    with no API key required.
 
     Parameters
     ----------
-    var_list : TYPE, optional
-        DESCRIPTION. Variables to extract from GFS. 
-        The default is ['ugrd10m','vgrd10m','apcpsfc'].
-    lat : TYPE, optional
-        DESCRIPTION. Lat and Lon of the data point.
-        The default is -29.75lon = 31.
+    var_list : ignored
+        Kept for backward compatibility.
+    lat : float, optional
+        Latitude of the forecast point. Default is -29.75 (Durban).
+    lon : float, optional
+        Longitude of the forecast point. Default is 31.
+    forecast_length : int, optional
+        Number of hourly steps to return. Default is 48.
 
     Returns
     -------
-    None.
-
+    pd.DataFrame
+        Columns: datetime (UTC timezone-aware), wind_speed (m/s),
+        direction (degrees from N, meteorological), rain (mm/hr).
     '''
-    f=getgfs.Forecast("0p25","1hr")
-    now = dt.datetime.utcnow()
-    future = now+dt.timedelta(hours=forecast_length)
+    # Open-Meteo works in whole days; request enough to cover forecast_length.
+    forecast_days = min(int(np.ceil(forecast_length / 24)) + 1, 16)
 
-    timeList = pd.date_range(now,periods=forecast_length, freq='1H').to_pydatetime()
+    url = _OPENMETEO_URL.format(lat=lat, lon=lon, days=forecast_days)
 
-    storDict={
-        'u10':[],
-        'v10':[],
-        'rain':[],
-        'wind_speed':[],
-        'direction':[]}
+    logger.info('Fetching GFS forecast via Open-Meteo for %d hours from %s',
+                forecast_length,
+                dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
+    try:
+        response = urlopen(url, timeout=_REQUEST_TIMEOUT)
+    except HTTPError as exc:
+        raise RuntimeError(
+            'Open-Meteo API returned HTTP %d: %s' % (exc.code, exc.reason)
+        ) from exc
+    except URLError as exc:
+        raise RuntimeError(
+            'Could not reach Open-Meteo API: %s' % exc.reason
+        ) from exc
 
-    for dat in timeList:
-        print(dat.strftime('%Y%m%d %H:%M'))
-        res = f.get(var_list,dat.strftime('%Y%m%d %H:%M'),lat,lon)
-        u = res.variables["ugrd10m"].data.flatten()[0].round(3)
-        v = res.variables["vgrd10m"].data.flatten()[0].round(3)
-        p = res.variables["apcpsfc"].data.flatten()[0].round(3)
-        if p>1000:
-            p=0
-        print(p)
-        spd = np.sqrt(u**2+v**2).round(3)
-        #this is wind going to... I must convert to coming from to sync with my model treatment 
-        direction = ((270-np.degrees(np.arctan2(v,u)))%360).round(3)
-        
-        storDict['u10'].append(u)
-        storDict['v10'].append(v)
-        storDict['rain'].append(p)
-        storDict['wind_speed'].append(spd)
-        storDict['direction'].append(direction)
-        
-    df = pd.DataFrame(data=storDict)
-    df['datetime'] = pd.date_range(now,periods=forecast_length, freq='1H',tz='UTC')
-    #replace hour minute second and round to nearest hr
-    df['datetime'] = df.datetime.map(lambda t: t.replace(microsecond=0,second=0,minute=0,hour=t.hour) \
-                                     +dt.timedelta(hours=t.minute//30))
-        
-    #convert to local timezone
-    # df['datetime']=df['datetime'].map(lambda x: x.tz_convert('Africa/Johannesburg'))
-    # df['datetime']=df['datetime'].map(lambda x: x.replace(tzinfo=to_zone))
-    df['year']=df['datetime'].dt.year
-    df['month']=df['datetime'].dt.month
-    df['day']=df['datetime'].dt.day
-    df['hour']=df['datetime'].dt.hour
-    
-    # df[['year','month','day','hour','u10','v10','rain','spd','direction']].to_csv('forcing/gfs.csv')
-    
-    return df[['datetime','wind_speed','direction','rain']]
+    data = js.load(response)
+    hourly = data['hourly']
+
+    # Trim to requested length and replace any null values.
+    def _clean(values, fill):
+        return [fill if v is None else v for v in values[:forecast_length]]
+
+    spd  = np.array(_clean(hourly['wind_speed_10m'],    np.nan), dtype=float).round(3)
+    dirs = np.array(_clean(hourly['wind_direction_10m'], np.nan), dtype=float).round(3)
+    rain = np.array(_clean(hourly['precipitation'],      0.0),   dtype=float).round(3)
+
+    times = pd.to_datetime(hourly['time'][:forecast_length], utc=True)
+
+    df = pd.DataFrame({
+        'datetime':   times,
+        'wind_speed': spd,
+        'direction':  dirs,
+        'rain':       rain,
+    })
+
+    return df[['datetime', 'wind_speed', 'direction', 'rain']]
 
 def read_raw_weather(fileName):
     '''
@@ -179,30 +193,15 @@ def formatDfWeather(df):
         north = pd.NamedAgg(column='north', aggfunc='mean'),
         rainfall = pd.NamedAgg(column = 'Rainfall intensity [mm]',aggfunc='sum'))
     
-    spd=[]
-    dirs=[]
     e = df['east'].values
     n = df['north'].values
-    for i in range(len(e)):
-        s = np.sqrt(e[i]**2+n[i]**2)
-        if e[i]>0 and n[i]>0:
-            #we are in quad 1
-            d = np.degrees(np.arctan(e[i]/n[i]))
-        elif e[i]>0 and n[i]<0:
-            #quad 2
-            d = 90+np.degrees(np.arctan(-n[i]/e[i]))
-        elif e[i]<0 and n[i]<0:
-            #quad 3
-            d = 270-np.degrees(np.arctan(-n[i]/-e[i]))
-        elif e[i]<0 and n[i]>0:
-            #quad 4
-            d = 360-np.degrees(np.arctan(-e[i]/n[i]))
-            
-        spd.append(s)
-        dirs.append(d)
-    
-    df['wind speed']=spd
-    df['direction']=dirs
+    spd = np.sqrt(e**2 + n**2)
+    # Convert (east, north) vector to meteorological bearing (clockwise from N).
+    # np.arctan2 handles all quadrants including e==0 or n==0.
+    dirs = (90 - np.degrees(np.arctan2(n, e))) % 360
+
+    df['wind speed'] = spd
+    df['direction'] = dirs
         
     #now make a new df in case missing dates
     

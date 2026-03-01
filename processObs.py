@@ -9,14 +9,20 @@ order observations into array (N,M)
     N - number of obs
     M - obs locations
 """
+import logging
 import pandas as pd
 import numpy as np
 import datetime as dt
 import json as js
-import pandas as pd
 from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 import configparser
 from pretreatment import read_obs_params
+
+logger = logging.getLogger(__name__)
+
+# Timeout in seconds for HTTP requests to the observations API.
+_REQUEST_TIMEOUT = 30
 
 def queryDB(_from):
     '''
@@ -33,10 +39,21 @@ def queryDB(_from):
     _fromStr = _from.strftime('%Y-%m-%dT%H:%M:%S')
     url = 'http://justinpringle.com/woza_ewandle/getObs/getObs.php?from={_from}'.format(
         _from=_fromStr)
-    response = urlopen(url)
-    
+    logger.info('Querying observations from %s', _fromStr)
+    try:
+        response = urlopen(url, timeout=_REQUEST_TIMEOUT)
+    except HTTPError as exc:
+        raise RuntimeError(
+            'Observations API returned HTTP %d: %s' % (exc.code, exc.reason)
+        ) from exc
+    except URLError as exc:
+        raise RuntimeError(
+            'Could not reach observations API: %s' % exc.reason
+        ) from exc
+
     dataJSON = js.load(response)
     num_items = len(dataJSON)
+    logger.info('Received %d observation records', num_items)
     
     obsDict = {
         'datetime':[],

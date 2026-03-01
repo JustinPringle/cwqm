@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# macOS
+.DS_Store
+
+# Runtime-generated forcing and observation data
+forcing/weather.csv
+forcing/umgeni_flow.csv
+observations/observations.csv
+
+# Runtime model state (written each run)
+start_files/init_c.csv
+start_files/p.out
+
+# Run output directories
+results/
+results_forecast/
+results_historical/

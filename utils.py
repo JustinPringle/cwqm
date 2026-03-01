@@ -8,122 +8,151 @@ utility functions
 """
 import numpy as np
 import pandas as pd
+from typing import Tuple
 
-def getDist(x1,y1,x2,y2):
+
+def getDist(x1: float, y1: float, x2: float, y2: float) -> float:
     '''
-    compute distance between two points
+    Compute Euclidean distance between two points.
+
+    Parameters
+    ----------
+    x1, y1 : float
+        Coordinates of the first point.
+    x2, y2 : float
+        Coordinates of the second point.
+
+    Returns
+    -------
+    float
+        Distance between the two points.
     '''
     dist = np.sqrt((x2-x1)**2+(y2-y1)**2)
     return dist
 
-def findCellID(ar_cell_label,XIn,YIn,ar_coorx,ar_coory):
+
+def findCellID(ar_cell_label: np.ndarray, XIn: float, YIn: float,
+               ar_coorx: np.ndarray, ar_coory: np.ndarray) -> int:
     '''
-    finds the cell ID closest to (XIn, YIn)
-    
-    ar_cell: (N,) int array
-        contains cell IDs
-    ar_coorx: (N,) float array
-        contains x co-ordinate of each cell (m)
-        Longitude expressed in UTM projection
-    ar_coory: (N,) float array
-        contains y co-ordinate of each cell (m)
-        Lattitude expressed in UTM projection
-    XIn: float
-        contains x co-ord for inputs
-        Longitude expressed in same proj as ar_coorx
-    YIn: float
-        contains y co-ord for inputs
-        Lattitude expressed in same proj as ar_coorx
+    Find the cell ID whose centre is closest to (XIn, YIn).
+
+    Parameters
+    ----------
+    ar_cell_label : array (N,) int
+        Cell IDs.
+    XIn : float
+        X coordinate of the query point (UTM, metres).
+    YIn : float
+        Y coordinate of the query point (UTM, metres).
+    ar_coorx : array (N,) float
+        X coordinates of cell centres (UTM, metres).
+    ar_coory : array (N,) float
+        Y coordinates of cell centres (UTM, metres).
+
+    Returns
+    -------
+    int
+        Label of the nearest cell.
+
+    Raises
+    ------
+    ValueError
+        If no cell centre is within one cell-length of (XIn, YIn).
     '''
-    
     nCells = len(ar_cell_label)
     dX = ar_coorx[1]-ar_coorx[0]
     dY = ar_coory[1]-ar_coory[0]
     #length of cell
     dC = np.sqrt(dX**2+dY**2)
-    
+
+    cellPos = None
     for i in range(nCells):
         dist = getDist(XIn, YIn, ar_coorx[i], ar_coory[i])
-        
-        if dist<dC:
+        if dist < dC:
             cellPos = ar_cell_label[i]
-            
+
+    if cellPos is None:
+        raise ValueError(
+            'No cell found within one cell-length of (%.1f, %.1f).' % (XIn, YIn)
+        )
     return cellPos
 
-def getWindAdv(ar_cell_label,ar_cell_bearing,ar_cell_length,wind_spd,wind_dir):
+def getWindAdv(ar_cell_label: np.ndarray, ar_cell_bearing: np.ndarray,
+               ar_cell_length: np.ndarray, wind_spd: float,
+               wind_dir: float) -> Tuple[np.ndarray, np.ndarray]:
     '''
-    
+    Project wind velocity onto each cell's along-cell direction.
 
     Parameters
     ----------
     ar_cell_label : array (N,)
-        cell ID's.
-    ar_cell_bearing : array(N,)
-        bearing of all the cells clockwise from North.
-    ar_cell_len : array (N,)
-        length of each cell
-        used to calculate the projection of wind on sp(cell).
+        Cell IDs.
+    ar_cell_bearing : array (N,)
+        Bearing of each cell clockwise from True North (degrees).
+    ar_cell_length : array (N,)
+        Length of each cell (metres); used to compute the projection.
     wind_spd : float
-        wind speed in m/s.
-    wind_dir: float
-        wind direction relative to true north
+        Wind speed (m/s).
+    wind_dir : float
+        Wind direction relative to True North (degrees, meteorological
+        convention — direction wind is coming *from*).
 
     Returns
     -------
-    ar_wind_along_cell: array (N,)
-        projection of the wind on the sp(cell)
-    
-    ar_wind_flag: array(N,)
-        1 for positive defined wind direction
-        -1 for negative defined wind direction
-        default +: from South to North
-
+    ar_wind_flag : array (N,)
+        +1 where wind has a positive along-cell component (S→N),
+        -1 where it has a negative component, 0 when wind is calm.
+    ar_wind_along_cell : array (N,)
+        Magnitude of the wind projection onto each cell (m/s).
     '''
-    
     #get math wind direction (anticlockwise from positive x axis)
     #change wind vector to be pointing IN the direction the wind is going i.e. add 180 degrees
-    
-    wd_going_to_r = np.radians(270-wind_dir)   
-    
+    wd_going_to_r = np.radians(270-wind_dir)
+
     #convert to vector as W = [x,y]
     W = wind_spd*np.array([np.cos(wd_going_to_r),np.sin(wd_going_to_r)])
-    
-    #stor empty list
+
     ar_wind_along_cell = []
-    ar_wind_flag=[]
-    #for each cell
+    ar_wind_flag = []
     for cell in range(len(ar_cell_label)):
-    # get the bearing, convert to math degrees 
+        # get the bearing, convert to math degrees
         bear_r = np.radians(90-ar_cell_bearing[cell])
-        
-    #convert to cell (C) to vector [x,y]
+
+        # convert cell to vector [x,y]
         C = ar_cell_length[cell]*np.array([np.cos(bear_r),np.sin(bear_r)])
-        
-    #calc projection using dot product as W_proj = C.W/C.C*C
+
+        # calc projection using dot product: W_proj = (C·W / C·C) * C
         W_proj = np.dot(C,W)/np.dot(C,C)*C
         ar_wind_along_cell.append(np.linalg.norm(W_proj))
-    #calc +1 or -1 as W_proj.C/(||W_proj||||C||)
-        flag = np.round(np.dot(W_proj,C)/np.linalg.norm(W_proj)/np.linalg.norm(C))
+
+        # calc sign: +1 or -1 as W_proj·C / (||W_proj|| ||C||)
+        # Guard against zero wind projection to avoid division by zero.
+        norm_proj = np.linalg.norm(W_proj)
+        if norm_proj == 0:
+            flag = 0.0
+        else:
+            flag = np.round(np.dot(W_proj,C)/norm_proj/np.linalg.norm(C))
         ar_wind_flag.append(flag)
-    
-    return np.asarray(ar_wind_flag),np.asarray(ar_wind_along_cell)
+
+    return np.asarray(ar_wind_flag), np.asarray(ar_wind_along_cell)
     
 
-def umgeniFlows(weatherDf,period='monthly'):
+def umgeniFlows(weatherDf: pd.DataFrame, period: str = 'monthly') -> pd.DataFrame:
     '''
-    use monthly base flows from Mardon (2003) and storm flows
+    Estimate Umgeni River flow combining Mardon (2003) monthly base flows
+    with a rational-method storm-flow contribution.
 
     Parameters
     ----------
-    weatherDf : dataframe 
-        containing weather data.
-    period : TYPE, optional
-        DESCRIPTION. The default is 'monthly'.
+    weatherDf : pd.DataFrame
+        Must contain columns 'datetime' (timezone-aware) and 'rain' (mm/hr).
+    period : str, optional
+        Reserved for future sub-monthly modes. Default is 'monthly'.
 
     Returns
     -------
-    None.
-
+    pd.DataFrame
+        Columns: 'datetime', 'flow' (m³/s).
     '''
     dates = weatherDf['datetime']
     rain = weatherDf['rain'].values
