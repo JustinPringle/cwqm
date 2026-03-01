@@ -4,66 +4,83 @@
 Created on Mon Jan 16 10:44:59 2023
 
 @author: justinpringle
-1. Use the api docs from the obscape website
+Fetch real-time weather observations from the obscape.com API.
 """
+import logging
 import numpy as np
 import json as js
 import pandas as pd
 from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 import datetime as dt
-from zoneinfo import ZoneInfo
 from dateutil import tz
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
+
+logger = logging.getLogger(__name__)
 
 from_zone = tz.gettz('UTC')
 to_zone = tz.gettz('Africa/Johannesburg')
 
+# Sentinel value used by the obscape API to flag missing / invalid readings.
+_MISSING_THRESHOLD = -100
+# Timeout in seconds for HTTP requests to the obscape API.
+_REQUEST_TIMEOUT = 30
 
-def getData(nowDate,fromDate,stationID=457,hours=168):
+
+def getData(nowDate: dt.datetime, fromDate: dt.datetime,
+            stationID: int = 457, hours: int = 168) -> pd.DataFrame:
     '''
-    
+    Fetch wind and rain observations from the obscape API.
 
     Parameters
     ----------
+    nowDate : datetime
+        End of the requested data window (UTC).
     fromDate : datetime
-        datetime object of the from date.
-    stationID : TYPE, optional
-        DESCRIPTION. The default is 457.
-    hours : TYPE, optional
-        DESCRIPTION. The default is 168.
+        Start of the requested data window (UTC).
+    stationID : int, optional
+        Obscape station ID for wind data. Default is 457 (Ushaka).
+    hours : int, optional
+        Legacy parameter kept for API compatibility. Default is 168.
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    pd.DataFrame
+        Hourly DataFrame with columns: datetime, wind_speed, direction, rain.
 
+    Raises
+    ------
+    HTTPError
+        If the obscape API returns a non-2xx response.
+    URLError
+        If the obscape API cannot be reached.
     '''
-    #store my user data in a dict
-    userDict={
-        'name':'Justin',
-        'api':'JKwPFmFGhRMzaua0pVKsIeIRHnuNOXexHLnn934pUQY5k0dK5X'}
-    #this is the ushaka 
-    # ushakaID=457
-    # hours = 2*168 #(1week)
-    
+    import os
+    api_name = os.environ.get('OBSCAPE_USERNAME', 'Justin')
+    api_key = os.environ.get('OBSCAPE_API_KEY', '')
+
     nowDateStr = nowDate.strftime('%Y-%m-%dT%H:%M:%S')
     fromDateStr = fromDate.strftime('%Y-%m-%dT%H:%M:%S')
-    
-    url = 'https://obscape.com/portal/api/v3/api?username={name}&project=ethek&key={key}&station={station}&from={_from}&to={_to}'.format(
-        name=userDict['name'],key=userDict['api'],station=stationID,_from=fromDateStr,
-        _to=nowDateStr)
-    
+
+    url = (
+        'https://obscape.com/portal/api/v3/api'
+        '?username={name}&project=ethek&key={key}'
+        '&station={station}&from={_from}&to={_to}'
+    ).format(name=api_name, key=api_key, station=stationID,
+             _from=fromDateStr, _to=nowDateStr)
+
     #rain from durban point Durban_Point
-    urlRain = 'https://obscape.com/portal/api/v3/api?username={name}&project=ethek&key={key}&ref={ref}&device={device}&from={_from}&to={_to}'.format(
-        name=userDict['name'],key=userDict['api'],ref='Durban_Point',device='rain',_from=fromDateStr,
-        _to=nowDateStr)
-    
-    print(url)
-    
-    response = urlopen(url)
-    responseR = urlopen(urlRain)
-    
+    urlRain = (
+        'https://obscape.com/portal/api/v3/api'
+        '?username={name}&project=ethek&key={key}'
+        '&ref={ref}&device={device}&from={_from}&to={_to}'
+    ).format(name=api_name, key=api_key, ref='Durban_Point',
+             device='rain', _from=fromDateStr, _to=nowDateStr)
+
+    logger.info('Fetching wind data from obscape (station %d)', stationID)
+    response = urlopen(url, timeout=_REQUEST_TIMEOUT)
+    logger.info('Fetching rain data from obscape (Durban_Point)')
+    responseR = urlopen(urlRain, timeout=_REQUEST_TIMEOUT)
+
     dataJSON = js.load(response)
     dataJSONRain = js.load(responseR)
     
@@ -90,22 +107,18 @@ def getData(nowDate,fromDate,stationID=457,hours=168):
         ew = data[i]['EastWindSpeed']
         nw = data[i]['NorthWindSpeed']
         
-        #check for nans
-        if wspd<-100:
-            wspd=np.nan
-        if ew<-100:
-            ew=np.nan
-        if nw <-100:
-            nw=np.nan
-        if wdir<-100:
-            wdir=np.nan
-        # if rain <-100:
-        #     rain=np.nan
-        
-        #correct times
+        #check for nans (API uses values below _MISSING_THRESHOLD to flag bad data)
+        if wspd < _MISSING_THRESHOLD:
+            wspd = np.nan
+        if ew < _MISSING_THRESHOLD:
+            ew = np.nan
+        if nw < _MISSING_THRESHOLD:
+            nw = np.nan
+        if wdir < _MISSING_THRESHOLD:
+            wdir = np.nan
+
+        #correct times (work in UTC internally)
         datFrom = dt.datetime.utcfromtimestamp(int(datUTC)).replace(tzinfo=from_zone)
-        datLocal = datFrom.astimezone(to_zone)
-        #I'm working in UTC until I need to show local time
         dfDict['datetime'].append(datFrom)
         dfDict['wind_speed'].append(wspd)
         dfDict['wind_direction'].append(wdir)
@@ -125,12 +138,10 @@ def getData(nowDate,fromDate,stationID=457,hours=168):
         rain = dataR[i]['precipitation']
         datUTC = dataR[i]['time']
         
-        if rain <-100:
-            rain=np.nan
-        
+        if rain < _MISSING_THRESHOLD:
+            rain = np.nan
+
         datFrom = dt.datetime.utcfromtimestamp(int(datUTC)).replace(tzinfo=from_zone)
-        datLocal = datFrom.astimezone(to_zone)
-        
         dfDictR['datetime'].append(datFrom)
         dfDictR['rain'].append(rain)
         
@@ -189,30 +200,15 @@ def format1HRW(df):
         north_wind = pd.NamedAgg(column='north_wind', aggfunc='mean'))#,
         #rain = pd.NamedAgg(column = 'rain',aggfunc='sum'))
     
-    spd=[]
-    dirs=[]
     e = df['east_wind'].values
     n = df['north_wind'].values
-    for i in range(len(e)):
-        s = np.sqrt(e[i]**2+n[i]**2)
-        if e[i]>0 and n[i]>0:
-            #we are in quad 1
-            d = np.degrees(np.arctan(e[i]/n[i]))
-        elif e[i]>0 and n[i]<0:
-            #quad 2
-            d = 90+np.degrees(np.arctan(-n[i]/e[i]))
-        elif e[i]<0 and n[i]<0:
-            #quad 3
-            d = 270-np.degrees(np.arctan(-n[i]/-e[i]))
-        elif e[i]<0 and n[i]>0:
-            #quad 4
-            d = 360-np.degrees(np.arctan(-e[i]/n[i]))
-            
-        spd.append(np.round(s,3))
-        dirs.append(np.round(d,3))
+    spd = np.round(np.sqrt(e**2 + n**2), 3)
+    # Convert (east, north) vector to meteorological bearing (clockwise from N).
+    # np.arctan2 handles all quadrants including e==0 or n==0.
+    dirs = np.round((90 - np.degrees(np.arctan2(n, e))) % 360, 3)
     
-    df['wind_speed']=spd
-    df['direction']=dirs
+    df['wind_speed'] = spd
+    df['direction'] = dirs
     
     df['datetime'] = pd.to_datetime(df[['year','month','day','hour']],utc=True)#.map(
         # lambda x: x.tz_convert('Africa/Johannesburg')

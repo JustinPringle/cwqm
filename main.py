@@ -11,12 +11,14 @@ This is the main code
 3. generate weather input
 4. generate umgeni flows
 """
+import logging
 import os
 import numpy as np
 import sys
 from forcingSort import get_gfs
 import obscape
 from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 import subprocess
 import pandas as pd
 import processObs
@@ -26,15 +28,25 @@ import postTreatment
 import res_plot
 from pretreatment import read_obs_params
 import configparser
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+logger = logging.getLogger(__name__)
+
 config = configparser.ConfigParser()
 config.read('model_ini.ini')
 file_obs_locs = config.get('input files','fileObsLocs')
 # import model
 
 #get gfs and obscape
+logger.info('Fetching GFS forecast data')
 gfsDf = get_gfs()
 now = dt.datetime.now()
 _from = now-dt.timedelta(days=60)
+logger.info('Fetching obscape weather observations')
 obsDf = obscape.getData(now,_from)
 
 #now merge the observed with forecast data
@@ -76,13 +88,10 @@ try:
     ecoliDf = processObs.queryDB(_from)
     ecoliDf['datetime']=ecoliDf['datetime'].map(lambda x: x.tz_localize('Africa/Johannesburg'))
     ecoliDf = ecoliDf.pivot(index='datetime', columns=['beach'],values='ecoli').rename_axis(None,axis=1)
-    
-    
-    
     #patch the observations
-    mergedEcoli = ecoliDf.combine_first(ecoliPadded)#,
-except ValueError:
-    print('no observations... moving on')    
+    mergedEcoli = ecoliDf.combine_first(ecoliPadded)
+except (ValueError, KeyError) as exc:
+    logger.warning('No usable observations from DB (%s); proceeding without.', exc)
     mergedEcoli=ecoliPadded
 
 mergedEcoli['year'] = mergedEcoli.index.year
@@ -96,6 +105,7 @@ cols = cols[-4::]+obsNames
 mergedEcoli[cols].to_csv('observations/observations.csv',index=False)
 
 #%%
+logger.info('Starting model run')
 ##### NOW TO THE MODEL ########
 import model
 #~~~~ read hotstart files ~~~~#
@@ -129,12 +139,22 @@ cDfNewMelt = cDfnew.melt(value_name='ecoli',ignore_index=False)
 cDfNewMelt.to_csv('start_files/C.csv',float_format='%.3f')
 
 ### POST to SQL
-
+logger.info('Writing results to database')
 con = postTreatment.create_con()
 postTreatment.create_sql_table_result(C, con,db='WQ2')
-os.system('cd /var/www/html/php/ && php wqJSON_generator.php')
+
+ret = os.system('cd /var/www/html/php/ && php wqJSON_generator.php')
+if ret != 0:
+    logger.warning('PHP JSON generator exited with code %d', ret)
+
 url = 'https://justinpringle.com/woza_ewandle/createJSON/wqJSON_generator.php'
-response = urlopen(url)
+try:
+    response = urlopen(url, timeout=30)
+    logger.info('JSON generator URL responded with status %s', response.status)
+except HTTPError as exc:
+    logger.error('JSON generator URL returned HTTP %d: %s', exc.code, exc.reason)
+except URLError as exc:
+    logger.error('Failed to reach JSON generator URL: %s', exc.reason)
 # con.close()
 
 
