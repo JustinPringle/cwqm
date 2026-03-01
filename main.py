@@ -117,7 +117,12 @@ startDate = weatherMerged['datetime'][0].to_pydatetime().strftime('%Y-%m-%d %H:%
 # save this to init_c
 # cDf['dates']=cDf.index.to_pydatetime()
 cDf = cDf.set_index('datetime')
-cDf[cDf.index==startDate].to_csv('start_files/init_c.csv',index=False)
+cDf_start = cDf[cDf.index == startDate]
+if len(cDf_start) > 0:
+    logger.info('Hot-start: loaded saved state for %s', startDate)
+    cDf_start.to_csv('start_files/init_c.csv', index=False)
+else:
+    logger.warning('Start date %s not found in C.csv — keeping existing init_c.csv', startDate)
 
 results = model.run()
 
