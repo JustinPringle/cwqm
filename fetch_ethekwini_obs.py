@@ -367,7 +367,7 @@ def push_to_db(beach_data: dict, db_cfg: dict, dry_run: bool = False) -> int:
             with conn.cursor() as cur:
                 # Check for existing row with same beach + datetime
                 cur.execute(
-                    "SELECT id FROM observations WHERE beach = %s AND datetime = %s",
+                    "SELECT 1 FROM observations WHERE beach = %s AND datetime = %s",
                     (beach, datetime_str),
                 )
                 if cur.fetchone():
