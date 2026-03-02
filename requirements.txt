@@ -1,7 +1,9 @@
 https://cdn.mysql.com/Downloads/Connector-Python/mysql-connector-python-2.1.3.tar.gz
 
 # fetch_ethekwini_obs.py dependencies
-pdfplumber
+# conda install -c conda-forge pdfminer.six requests beautifulsoup4
+# pip install pymysql
+pdfminer.six
 requests
 beautifulsoup4
 pymysql

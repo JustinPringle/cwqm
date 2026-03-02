@@ -40,7 +40,8 @@ Or export environment variables:
 
 Dependencies
 ------------
-    pip install pdfplumber requests beautifulsoup4 pymysql
+    conda install -c conda-forge pdfminer.six requests beautifulsoup4
+    pip install pymysql
 
 Usage
 -----
@@ -60,8 +61,9 @@ import datetime as dt
 import time
 
 import requests
-import pdfplumber
 from bs4 import BeautifulSoup
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTTextBox
 import pymysql
 import pymysql.cursors
 
@@ -86,10 +88,14 @@ BEACH_NAME_MAP = {
 
 MODEL_BEACHES = ["point", "ushaka", "south", "north", "pirates", "country club"]
 
-# Regex: DD/MM/YYYY  BEACH NAME (1-3 words)  E-COLI NUMBER  OPEN|CLOSED
-_ROW_RE = re.compile(
-    r"(\d{2}/\d{2}/\d{4})\s+([A-Z][A-Z ']+?)\s+(\d+)\s+(OPEN|CLOSED)"
-)
+_DATE_RE   = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+_NUMBER_RE = re.compile(r"^\d+$")
+
+# PDF layout: group text boxes into rows by rounding y-coordinate to this bucket.
+# Row spacing in the PDF is ~12 pt; 6 is large enough to catch any slight
+# misalignment between elements on the same row but small enough not to bleed
+# into the adjacent row.
+_Y_BUCKET = 6
 
 _REQUEST_TIMEOUT = 60   # seconds
 
@@ -157,39 +163,98 @@ def download_pdf(url: str) -> bytes:
 # Step 3 – Parse the PDF
 # ---------------------------------------------------------------------------
 
+def _pdf_rows(pdf_bytes: bytes) -> list[dict]:
+    """
+    Extract text boxes from PDF page 1, group them by y-coordinate into rows,
+    and return each row as a dict keyed by the element's role.
+
+    The PDF uses a two-column layout.  pdfminer's LTTextBox gives us the
+    bounding box of each element so we can reconstruct rows precisely:
+
+        DATE (x≈58 or 389)  BEACH (x≈115-140 or 450-467)
+        ECOLI (x≈205 or 538)  STATUS (x≈296-301 or 613)
+
+    Elements on the same data row share the same y1 to within ~2 pt.
+    """
+    from collections import defaultdict
+
+    # Collect (y1, x0, text) for every non-empty text box on page 1
+    boxes = []
+    for page in extract_pages(io.BytesIO(pdf_bytes), page_numbers=[0]):
+        for el in page:
+            if isinstance(el, LTTextBox):
+                x0, _y0, _x1, y1 = el.bbox
+                text = " ".join(el.get_text().split())   # normalise whitespace
+                if text:
+                    boxes.append((y1, x0, text))
+
+    # Group into rows by rounding y1 to nearest _Y_BUCKET
+    buckets: dict = defaultdict(list)
+    for y, x, text in boxes:
+        bucket = round(y / _Y_BUCKET) * _Y_BUCKET
+        buckets[bucket].append((x, text))
+
+    rows = []
+    for _bucket, elements in buckets.items():
+        elements.sort()                         # left → right by x
+        texts = [t for _, t in elements]
+
+        date_s  = next((t for t in texts if _DATE_RE.match(t)), None)
+        status  = next((t for t in texts if t in ("OPEN", "CLOSED")), None)
+        ecoli_s = next((t for t in texts if _NUMBER_RE.match(t)), None)
+
+        if not (date_s and status and ecoli_s):
+            continue
+
+        # Beach name: text boxes that sit between the date and ecoli by x-position
+        x_date  = next(x for x, t in elements if t == date_s)
+        x_ecoli = next(x for x, t in elements if _NUMBER_RE.match(t))
+        beach_parts = [
+            t for x, t in elements
+            if x_date < x < x_ecoli
+            and not _DATE_RE.match(t)
+            and not _NUMBER_RE.match(t)
+            and t not in ("OPEN", "CLOSED")
+        ]
+        beach_raw = " ".join(beach_parts).strip()
+
+        if beach_raw:
+            rows.append({
+                "date":   date_s,
+                "beach":  beach_raw,
+                "ecoli":  int(ecoli_s),
+                "status": status,
+            })
+            logger.debug("  row: %s  %s  %d  %s", date_s, beach_raw, int(ecoli_s), status)
+
+    return rows
+
+
 def parse_pdf(pdf_bytes: bytes) -> dict:
     """
-    Extract E. coli counts from the PDF page 1 text.
+    Parse the beach water-quality PDF and return E. coli data for model beaches.
+
+    Uses pdfminer.six layout analysis to group text elements by their
+    y-coordinate into rows, then maps beach names to model location names.
 
     Returns
     -------
     dict  {model_beach_name: {"ecoli": int, "sample_date": datetime, "status": str}}
     """
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        text = pdf.pages[0].extract_text() or ""
-
-    logger.debug("PDF text (page 1):\n%s", text)
-
     results = {}
-    for m in _ROW_RE.finditer(text):
-        date_s, beach_raw, ecoli_s, status = m.groups()
-        beach_raw  = beach_raw.strip()
-        model_name = BEACH_NAME_MAP.get(beach_raw)
-
+    for row in _pdf_rows(pdf_bytes):
+        model_name = BEACH_NAME_MAP.get(row["beach"])
         if model_name is None:
-            logger.debug("  skipped: %s", beach_raw)
             continue
 
-        # Parse sample date; use noon as the time (PDFs carry date only)
-        sample_date = dt.datetime.strptime(date_s, "%d/%m/%Y").replace(hour=12)
-
+        sample_date = dt.datetime.strptime(row["date"], "%d/%m/%Y").replace(hour=12)
         results[model_name] = {
-            "ecoli":       int(ecoli_s),
+            "ecoli":       row["ecoli"],
             "sample_date": sample_date,
-            "status":      status,
+            "status":      row["status"],
         }
         logger.info("  %-16s  ecoli=%4d  date=%s  status=%s",
-                    model_name, int(ecoli_s), date_s, status)
+                    model_name, row["ecoli"], row["date"], row["status"])
 
     missing = [b for b in MODEL_BEACHES if b not in results]
     if missing:
