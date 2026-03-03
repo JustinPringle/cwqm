@@ -17,6 +17,9 @@ observations/observations.csv
 start_files/init_c.csv
 start_files/p.out
 
+# Secrets — never commit credentials
+.env
+
 # Run output directories
 results/
 results_forecast/
