@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 import os
 import datetime as dt
+import time
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 from dateutil import tz
@@ -70,16 +71,31 @@ def get_gfs(var_list=None, lat=-29.75, lon=31, forecast_length=48):
     logger.info('Fetching GFS forecast via Open-Meteo for %d hours from %s',
                 forecast_length,
                 dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
-    try:
-        response = urlopen(url, timeout=_REQUEST_TIMEOUT)
-    except HTTPError as exc:
-        raise RuntimeError(
-            'Open-Meteo API returned HTTP %d: %s' % (exc.code, exc.reason)
-        ) from exc
-    except URLError as exc:
-        raise RuntimeError(
-            'Could not reach Open-Meteo API: %s' % exc.reason
-        ) from exc
+
+    _MAX_ATTEMPTS = 3
+    _RETRY_DELAY  = 15  # seconds between attempts
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            response = urlopen(url, timeout=_REQUEST_TIMEOUT)
+            break  # success — exit the retry loop
+        except HTTPError as exc:
+            # HTTP errors (4xx/5xx) are unlikely to be transient; raise immediately.
+            raise RuntimeError(
+                'Open-Meteo API returned HTTP %d: %s' % (exc.code, exc.reason)
+            ) from exc
+        except URLError as exc:
+            if attempt < _MAX_ATTEMPTS:
+                logger.warning(
+                    'Open-Meteo unreachable (attempt %d/%d): %s — retrying in %ds',
+                    attempt, _MAX_ATTEMPTS, exc.reason, _RETRY_DELAY,
+                )
+                time.sleep(_RETRY_DELAY)
+            else:
+                raise RuntimeError(
+                    'Could not reach Open-Meteo API after %d attempts: %s'
+                    % (_MAX_ATTEMPTS, exc.reason)
+                ) from exc
 
     data = js.load(response)
     hourly = data['hourly']
