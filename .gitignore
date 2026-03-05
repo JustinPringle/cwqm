@@ -18,7 +18,12 @@ observations/observations.csv
 
 # Runtime model state (written each run)
 start_files/init_c.csv
+start_files/init_C.csv
+start_files/C.csv
 start_files/p.out
+
+# Log output
+output.log
 
 # Secrets — never commit credentials
 .env
