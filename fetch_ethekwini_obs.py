@@ -50,6 +50,7 @@ Usage
     python fetch_ethekwini_obs.py --verbose  # debug logging
     python fetch_ethekwini_obs.py --pdf-url <url>  # skip scraping, use this PDF
 """
+from __future__ import annotations
 
 import argparse
 import configparser
