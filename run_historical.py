@@ -41,8 +41,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Period (timezone-naive SAST datetimes, matching main.py convention)
 # ---------------------------------------------------------------------------
-START = dt.datetime(2025, 1, 1)
-END   = dt.datetime(2026, 3, 1)
+START = dt.datetime(2022, 1, 1)
+END   = dt.datetime(2026, 3, 23)
 OUT_DIR = 'results_historical'
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -130,6 +130,9 @@ try:
                .pivot(index='datetime', columns='beach', values='ecoli')
                .rename_axis(None, axis=1))
     mergedEcoli = ecoliDf.combine_first(ecoliPadded)
+    # combine_first can leave NaN where the DB had data for some beaches
+    # but not others at a given timestamp. Replace with -9 (missing convention).
+    mergedEcoli[obsNames] = mergedEcoli[obsNames].fillna(-9.0)
     logger.info('Merged %d observation records from database', len(ecoliDf))
 except (ValueError, KeyError, RuntimeError) as exc:
     logger.warning('No usable observations from DB (%s); running without assimilation.', exc)
@@ -173,23 +176,30 @@ ar_obs_names, ar_obs_coorx, ar_obs_coory = read_obs_params(file_obs_locs)
 # ---------------------------------------------------------------------------
 # 6. Per-beach results
 # ---------------------------------------------------------------------------
+# obs_aligned = mergedEcoli.tz_localize(None).reindex(dates) if mergedEcoli.index.tz is not None else mergedEcoli.reindex(dates)
+
 rows = []
+rain_series = weatherDf.rain.values
 for i, beach in enumerate(ar_obs_names):
     cell_id = ut.findCellID(ar_cell_label,
                             ar_obs_coorx[i], ar_obs_coory[i],
                             ar_cell_coorx, ar_cell_coory) - 1
     ecoli_series = X[:nb_steps, cell_id]
-    for d, e in zip(dates, ecoli_series):
+    # obs_series = obs_aligned[beach].values if beach in obs_aligned.columns else np.full(nb_steps, np.nan)
+    
+    for d, e, r in zip(dates, ecoli_series,rain_series):
         rows.append({
             'datetime':  d,
             'beach':     beach,
             'ecoli_cfu': round(float(e), 1),
             'wq_class':  _replaceitem(e),
+            # 'obs_cfu':   round(float(o), 1) if not np.isnan(o) else None,
+            'rain':r
         })
 
 beach_df = pd.DataFrame(rows)
 beach_path = os.path.join(OUT_DIR, 'wq_by_beach.csv')
-beach_df.to_csv(beach_path, index=False, date_format='%Y-%m-%d %H:%M')
+beach_df.to_csv(beach_path, index=False, date_format='%Y-%m-%d %H:%M',float_format='%.2f')
 logger.info('Beach results  -> %s  (%d rows)', beach_path, len(beach_df))
 
 # ---------------------------------------------------------------------------

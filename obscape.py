@@ -67,7 +67,7 @@ def getData(nowDate: dt.datetime, fromDate: dt.datetime,
         '&station={station}&from={_from}&to={_to}'
     ).format(name=api_name, key=api_key, station=stationID,
              _from=fromDateStr, _to=nowDateStr)
-
+    print(url)
     #rain from durban point Durban_Point
     urlRain = (
         'https://obscape.com/portal/api/v3/api'

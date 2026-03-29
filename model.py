@@ -334,8 +334,19 @@ def run(ini_file='model_ini.ini'):
                                    ar_obs_coory[i], ar_cell_coorx, ar_cell_coory)
         D[i,cellID_obs-1]=1
     
-    P = np.loadtxt(file_cov_matrix)
-    
+    reset_p = config.getboolean('input files', 'resetP', fallback=False)
+    # print(reset_p)
+    if reset_p:
+        # Initialise P from scratch: P_0 = diag(C0^2), assuming initial
+        # error variance proportional to the square of the initial state.
+        # Cells with zero concentration get a small default variance (1.0).
+        p_diag = np.where(ar_init_concs > 0, ar_init_concs ** 2, 1.0)
+        P = np.diag(p_diag)
+        print('p starting from scratch')
+        np.savetxt('start_files/p_init.out', P, fmt='%.2f')
+    else:
+        P = np.loadtxt(file_cov_matrix)
+
     #~~~~ Create a parameter dictionary ~~~~#
     nb_time_steps = ar_rivers.shape[0]
     execParams = {
@@ -513,14 +524,14 @@ def _exec(params):
             x_k_no_update[t+1,:]=x[:]
         # update P use exponential decay weighting
             P_new = alpha*np.dot(phi,np.dot(P_new,phi.T))+Q+(1-alpha)*P_new
-        # check for obs
-        if ar_obs_vals[t,0]>0:
-            # break
-            #we have an observation
-            #prediction is x
-            obs = ar_obs_vals[t,:]
+        # check for obs — use only valid (> 0, non-NaN) observations
+        obs_raw = ar_obs_vals[t,:]
+        valid = (~np.isnan(obs_raw)) & (obs_raw > 0)
+        if np.any(valid):
+            obs = obs_raw[valid]
+            D_valid = D[valid, :]
             R = np.eye(len(obs))*obs*R_fac
-            x_update,P_new,K_new = kf_update(x,obs,D,P_new,Q,R,mardon_iter=False)
+            x_update,P_new,K_new = kf_update(x,obs,D_valid,P_new,Q,R,mardon_iter=False)
             
             #set new x
             x = alpha2*x_update[:]+(1-alpha2)*x
