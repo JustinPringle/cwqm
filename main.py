@@ -90,6 +90,9 @@ try:
     ecoliDf = ecoliDf.pivot(index='datetime', columns=['beach'],values='ecoli').rename_axis(None,axis=1)
     #patch the observations
     mergedEcoli = ecoliDf.combine_first(ecoliPadded)
+    # combine_first can leave NaN where the DB had data for some beaches
+    # but not others at a given timestamp. Replace with -9 (missing convention).
+    mergedEcoli[obsNames] = mergedEcoli[obsNames].fillna(-9.0)
 except (ValueError, KeyError) as exc:
     logger.warning('No usable observations from DB (%s); proceeding without.', exc)
     mergedEcoli=ecoliPadded

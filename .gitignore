@@ -19,8 +19,11 @@ observations/observations.csv
 # Runtime model state (written each run)
 start_files/init_c.csv
 start_files/init_C.csv
+start_files/init_C1.csv
 start_files/C.csv
 start_files/p.out
+start_files/p_copy.out
+start_files/p_init.out
 
 # Log output
 output.log
