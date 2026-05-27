@@ -80,10 +80,19 @@ def get_gfs(var_list=None, lat=-29.75, lon=31, forecast_length=48):
             response = urlopen(url, timeout=_REQUEST_TIMEOUT)
             break  # success — exit the retry loop
         except HTTPError as exc:
-            # HTTP errors (4xx/5xx) are unlikely to be transient; raise immediately.
-            raise RuntimeError(
-                'Open-Meteo API returned HTTP %d: %s' % (exc.code, exc.reason)
-            ) from exc
+             # 5xx errors (and 429 rate-limit) are transient; retry them.
+            # 4xx client errors are permanent — raise immediately.
+            _TRANSIENT_CODES = {429, 500, 502, 503, 504}
+            if exc.code in _TRANSIENT_CODES and attempt < _MAX_ATTEMPTS:
+                logger.warning(
+                    'Open-Meteo returned HTTP %d (attempt %d/%d) — retrying in %ds',
+                    exc.code, attempt, _MAX_ATTEMPTS, _RETRY_DELAY,
+                )
+                time.sleep(_RETRY_DELAY)
+            else:
+                raise RuntimeError(
+                    'Open-Meteo API returned HTTP %d: %s' % (exc.code, exc.reason)
+                ) from exc
         except URLError as exc:
             if attempt < _MAX_ATTEMPTS:
                 logger.warning(
