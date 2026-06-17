@@ -28,7 +28,11 @@ import postTreatment
 import res_plot
 from pretreatment import read_obs_params
 import configparser
+import openmeteo
 
+## 
+DRY_RUN = os.environ.get('WOZA_DRY_RUN', '0') == '1'
+##
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(name)s: %(message)s',
@@ -46,17 +50,20 @@ logger.info('Fetching GFS forecast data')
 gfsDf = get_gfs()
 now = dt.datetime.now()
 _from = now-dt.timedelta(days=60)
-logger.info('Fetching obscape weather observations')
-obsDf = obscape.getData(now,_from)
+# logger.info('Fetching obscape weather observations')
+# obsDf = obscape.getData(now,_from)
 
 #now merge the observed with forecast data
 
 #note the times here are in UTC so I must change them to Africa/Johannesburg 
 # before the model is run
 #%%
-weatherMerged = obsDf.merge(gfsDf,
-                            on=['datetime','wind_speed','rain','direction'],
-                            how='outer')
+# weatherMerged = obsDf.merge(gfsDf,
+#                             on=['datetime','wind_speed','rain','direction'],
+#                             how='outer')
+
+weatherMerged = openmeteo.getWeather(now, lat=-29.87, lon=31.04,
+                                     past_days=60, forecast_days=2)
 
 #save as a csv
 #set timezone
@@ -147,22 +154,23 @@ cDfNewMelt = cDfnew.melt(value_name='ecoli',ignore_index=False)
 cDfNewMelt.to_csv('start_files/C.csv',float_format='%.3f')
 
 ### POST to SQL
-logger.info('Writing results to database')
-con = postTreatment.create_con()
-postTreatment.create_sql_table_result(C, con,db='WQ2')
+if not DRY_RUN:
+    logger.info('Writing results to database')
+    con = postTreatment.create_con()
+    postTreatment.create_sql_table_result(C, con,db='WQ2')
 
-ret = os.system('cd /var/www/html/php/ && php wqJSON_generator.php')
-if ret != 0:
-    logger.warning('PHP JSON generator exited with code %d', ret)
+    ret = os.system('cd /var/www/html/php/ && php wqJSON_generator.php')
+    if ret != 0:
+        logger.warning('PHP JSON generator exited with code %d', ret)
 
-url = 'https://justinpringle.com/woza_ewandle/createJSON/wqJSON_generator.php'
-try:
-    response = urlopen(url, timeout=30)
-    logger.info('JSON generator URL responded with status %s', response.status)
-except HTTPError as exc:
-    logger.error('JSON generator URL returned HTTP %d: %s', exc.code, exc.reason)
-except URLError as exc:
-    logger.error('Failed to reach JSON generator URL: %s', exc.reason)
+    url = 'https://justinpringle.com/woza_ewandle/createJSON/wqJSON_generator.php'
+    try:
+        response = urlopen(url, timeout=30)
+        logger.info('JSON generator URL responded with status %s', response.status)
+    except HTTPError as exc:
+        logger.error('JSON generator URL returned HTTP %d: %s', exc.code, exc.reason)
+    except URLError as exc:
+        logger.error('Failed to reach JSON generator URL: %s', exc.reason)
 # con.close()
 
 

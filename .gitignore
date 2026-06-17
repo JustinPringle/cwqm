@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .Python
 .spyproject
+*.bak
 
 # macOS
 .DS_Store
